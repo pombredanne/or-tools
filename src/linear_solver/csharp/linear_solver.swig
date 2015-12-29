@@ -36,6 +36,15 @@
 #include "linear_solver/linear_solver_ext.h"
 %}
 
+// We need to forward-declare the proto here, so that the PROTO_* macros
+// involving them work correctly. The order matters very much: this declaration
+// needs to be before the %{ #include ".../linear_solver.h" %}.
+namespace operations_research {
+class MPModelProto;
+class MPModelRequest;
+class MPSolutionResponse;
+}  // namespace operations_research
+
 // Allow partial C# classes. That way, we can put our C# code extension in C#
 // files instead of using typemap(cscode).
 /* allow partial c# classes */
@@ -187,6 +196,7 @@
 
 // MPSolverParameters API. For expert users only.
 %unignore operations_research::MPSolverParameters;
+%unignore operations_research::MPSolverParameters::MPSolverParameters;
 %unignore operations_research::MPSolverParameters::DoubleParam;
 %unignore operations_research::MPSolverParameters::RELATIVE_MIP_GAP;
 %unignore operations_research::MPSolverParameters::GetDoubleParam;

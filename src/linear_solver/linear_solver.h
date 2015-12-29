@@ -156,11 +156,6 @@ class MPSolverInterface;
 class MPSolverParameters;
 class MPVariable;
 
-// Forward declarations needed by SWIG. See java/linear_solver.swig for details.
-class MPModelProto;
-class MPModelRequest;
-class MPSolutionResponse;
-
 // This mathematical programming (MP) solver class is the main class
 // though which users build and solve problems.
 class MPSolver {
@@ -367,6 +362,11 @@ class MPSolver {
   // valid, populate "error_message".
   MPSolverResponseStatus LoadModelFromProto(const MPModelProto& input_model,
                                             std::string* error_message);
+  // The same as above, except that the loading keeps original variable and
+  // constraint names. Caller should make sure that all variable names and
+  // constraint names are unique, respectively.
+  MPSolverResponseStatus LoadModelFromProtoWithUniqueNamesOrDie(
+      const MPModelProto& input_model, std::string* error_message);
 
   // Encodes the current solution in a solution response protocol buffer.
   // Only nonzero variable values are stored in order to reduce the
@@ -589,6 +589,9 @@ class MPSolver {
   // Permanent storage for SetSolverSpecificParametersAsString().
   std::string solver_specific_parameter_string_;
 
+
+  MPSolverResponseStatus LoadModelFromProtoInternal(
+      const MPModelProto& input_model, bool clear_names, std::string* error_message);
 
   DISALLOW_COPY_AND_ASSIGN(MPSolver);
 };
@@ -1281,6 +1284,16 @@ class MPSolverInterface {
   virtual void SetPrimalTolerance(double value) = 0;
   virtual void SetDualTolerance(double value) = 0;
   virtual void SetPresolveMode(int value) = 0;
+
+  // Pass solver specific parameters in text format. The format is
+  // solver-specific and is the same as the corresponding solver configuration
+  // file format. Returns true if the operation was successful.
+  //
+  // The default implementation of this method stores the parameters in a
+  // temporary file and calls ReadParameterFile to import the parameter file
+  // into the solver. Solvers that support passing the parameters directly can
+  // override this method to skip the temporary file logic.
+  virtual bool SetSolverSpecificParametersAsString(const std::string& parameters);
 
   // Reads a solver-specific file of parameters and set them.
   // Returns true if there was no errors.

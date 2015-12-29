@@ -34,8 +34,16 @@
 %include "util/java/vector.swig"
 
 
+// We need to forward-declare the proto here, so that the PROTO_* macros
+// involving them work correctly. The order matters very much: this declaration
+// needs to be before the %{ #include ".../linear_solver.h" %}.
+namespace operations_research {
+class MPModelProto;
+class MPModelRequest;
+class MPSolutionResponse;
+}  // namespace operations_research
+
 %{
-#include "linear_solver/linear_solver.pb.h"
 #include "linear_solver/linear_solver.h"
 #include "linear_solver/linear_solver_ext.h"
 %}
@@ -112,6 +120,7 @@ import java.lang.reflect.*;
 // List of the classes exposed.
 %unignore operations_research::MPSolver;
 %unignore operations_research::MPSolver::MPSolver;
+%unignore operations_research::MPSolver::~MPSolver;
 %unignore operations_research::MPConstraint;
 %unignore operations_research::MPVariable;
 %unignore operations_research::MPObjective;
@@ -233,6 +242,7 @@ import java.lang.reflect.*;
 // MPSolverParameters API. For expert users only.
 // TODO(user): unit test all of it.
 %unignore operations_research::MPSolverParameters;  // no test
+%unignore operations_research::MPSolverParameters::MPSolverParameters;  // no test
 %unignore operations_research::MPSolverParameters::DoubleParam;  // no test
 %unignore operations_research::MPSolverParameters::RELATIVE_MIP_GAP;  // no test
 %rename (getDoubleParam) operations_research::MPSolverParameters::GetDoubleParam;  // no test

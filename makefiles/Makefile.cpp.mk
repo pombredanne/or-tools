@@ -436,7 +436,6 @@ CONSTRAINT_SOLVER_LIB_OBJS = \
 	$(OBJ_DIR)/constraint_solver/default_search.$O\
 	$(OBJ_DIR)/constraint_solver/demon_profiler.$O\
 	$(OBJ_DIR)/constraint_solver/demon_profiler.pb.$O\
-	$(OBJ_DIR)/constraint_solver/dependency_graph.$O\
 	$(OBJ_DIR)/constraint_solver/deviation.$O\
 	$(OBJ_DIR)/constraint_solver/diffn.$O\
 	$(OBJ_DIR)/constraint_solver/element.$O\
@@ -513,9 +512,6 @@ $(GEN_DIR)/constraint_solver/demon_profiler.pb.cc:$(SRC_DIR)/constraint_solver/d
 	$(PROTOBUF_DIR)/bin/protoc --proto_path=$(INC_DIR) --cpp_out=$(GEN_DIR) $(SRC_DIR)/constraint_solver/demon_profiler.proto
 
 $(GEN_DIR)/constraint_solver/demon_profiler.pb.h:$(GEN_DIR)/constraint_solver/demon_profiler.pb.cc
-
-$(OBJ_DIR)/constraint_solver/dependency_graph.$O:$(SRC_DIR)/constraint_solver/dependency_graph.cc
-	$(CCC) $(CFLAGS) -c $(SRC_DIR)/constraint_solver/dependency_graph.cc $(OBJ_OUT)$(OBJ_DIR)$Sconstraint_solver$Sdependency_graph.$O
 
 $(OBJ_DIR)/constraint_solver/deviation.$O:$(SRC_DIR)/constraint_solver/deviation.cc
 	$(CCC) $(CFLAGS) -c $(SRC_DIR)/constraint_solver/deviation.cc $(OBJ_OUT)$(OBJ_DIR)$Sconstraint_solver$Sdeviation.$O
@@ -1388,6 +1384,12 @@ $(OBJ_DIR)/ac4r_table_test.$O:$(EX_DIR)/tests/ac4r_table_test.cc $(SRC_DIR)/cons
 $(BIN_DIR)/ac4r_table_test$E: $(DYNAMIC_CP_DEPS) $(OBJ_DIR)/ac4r_table_test.$O
 	$(CCC) $(CFLAGS) $(OBJ_DIR)/ac4r_table_test.$O $(DYNAMIC_CP_LNK) $(DYNAMIC_LD_FLAGS) $(EXE_OUT)$(BIN_DIR)$Sac4r_table_test$E
 
+$(OBJ_DIR)/forbidden_intervals_test.$O:$(EX_DIR)/tests/forbidden_intervals_test.cc $(SRC_DIR)/constraint_solver/constraint_solver.h
+	$(CCC) $(CFLAGS) -c $(EX_DIR)$Stests/forbidden_intervals_test.cc $(OBJ_OUT)$(OBJ_DIR)$Sforbidden_intervals_test.$O
+
+$(BIN_DIR)/forbidden_intervals_test$E: $(DYNAMIC_CP_DEPS) $(OBJ_DIR)/forbidden_intervals_test.$O
+	$(CCC) $(CFLAGS) $(OBJ_DIR)/forbidden_intervals_test.$O $(DYNAMIC_CP_LNK) $(DYNAMIC_LD_FLAGS) $(EXE_OUT)$(BIN_DIR)$Sforbidden_intervals_test$E
+
 $(OBJ_DIR)/gcc_test.$O:$(EX_DIR)/tests/gcc_test.cc $(SRC_DIR)/constraint_solver/constraint_solver.h
 	$(CCC) $(CFLAGS) -c $(EX_DIR)$Stests/gcc_test.cc $(OBJ_OUT)$(OBJ_DIR)$Sgcc_test.$O
 
@@ -1722,6 +1724,35 @@ endif
 	cd temp && tar cvzf ../Google.OrTools.cc.$(PORT).$(GIT_REVISION).tar.gz or-tools.$(PORT)
 	-$(DELREC) temp
 endif
+
+ifeq "$(SYSTEM)" "win"
+fz_archive: fz
+	-$(DELREC) temp
+	mkdir temp
+	mkdir temp\\or-tools.$(PORT)
+	mkdir temp\\or-tools.$(PORT)\\bin
+	mkdir temp\\or-tools.$(PORT)\\share
+	mkdir temp\\or-tools.$(PORT)\\share\\minizinc
+	copy LICENSE-2.0.txt temp\\or-tools.$(PORT)
+	copy bin\\fz.exe temp\\or-tools.$(PORT)\\bin\\fzn-or-tools.exe
+	copy src\\flatzinc\\mznlib\\*.mzn temp\\or-tools.$(PORT)\\share\\minizinc
+	cd temp && ..\tools\zip.exe -r ..\Google.OrTools.flatzinc.$(PORT).$(GIT_REVISION).zip or-tools.$(PORT)
+	-$(DELREC) temp
+else
+fz_archive: $(LIB_DIR)/$(LIBPREFIX)ortools.$(DYNAMIC_LIB_SUFFIX)
+	-$(DELREC) temp
+	mkdir temp
+	mkdir temp/or-tools.$(PORT)
+	mkdir temp/or-tools.$(PORT)/bin
+	mkdir temp/or-tools.$(PORT)/share
+	mkdir temp/or-tools.$(PORT)/share/minizinc
+	cp LICENSE-2.0.txt temp/or-tools.$(PORT)
+	cp bin/fz temp/or-tools.$(PORT)/bin/fzn-or-tools
+	cp src/flatzinc/mznlib/* temp/or-tools.$(PORT)/share/minizinc
+	cd temp && tar cvzf ../Google.OrTools.flatzinc.$(PORT).$(GIT_REVISION).tar.gz or-tools.$(PORT)
+	-$(DELREC) temp
+endif
+
 
 # Debug
 printdir:

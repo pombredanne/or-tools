@@ -34,7 +34,7 @@ CPSEP = :
 SED = sed
 
 # This is needed to find python.h
-PYTHON_INC = -I/usr/include/python$(UNIX_PYTHON_VER) -I/usr/lib/python$(UNIX_PYTHON_VER)
+PYTHON_INC = -I/usr/include/python$(UNIX_PYTHON_VER) -I/usr/lib/python$(UNIX_PYTHON_VER) $(ADD_PYTHON_INC)
 PYTHON_VERSION = $(UNIX_PYTHON_VER)
 # This is needed to find gflags/gflags.h
 GFLAGS_INC = -I$(UNIX_GFLAGS_DIR)/include
@@ -169,11 +169,11 @@ ifeq ($(PLATFORM),LINUX)
   endif
   ifdef UNIX_SLM_DIR
     ifeq ($(PTRLENGTH),64)
-      DYNAMIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux64/bin/ -L$(UNIX_SLM_DIR)/linux64/bin/ -m64 -lc -ldl -lm -lpthread -lsulum10
-      STATIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux64/bin/ -L$(UNIX_SLM_DIR)/linux64/bin/ -m64 -lc -ldl -lm -lpthread -lsulum10
+      DYNAMIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux64/bin/ -L$(UNIX_SLM_DIR)/linux64/bin/ -m64 -lc -ldl -lm -lpthread -lsulum$(UNIX_SULUM_VERSION)
+      STATIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux64/bin/ -L$(UNIX_SLM_DIR)/linux64/bin/ -m64 -lc -ldl -lm -lpthread -lsulum$(UNIX_SULUM_VERSION)
     else
-      DYNAMIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux32/bin/ -L$(UNIX_SLM_DIR)/linux32/bin/ -m32 -lc -ldl -lm -lpthread -lsulum10
-      STATIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux32/bin/ -L$(UNIX_SLM_DIR)/linux32/bin/ -m32 -lc -ldl -lm -lpthread -lsulum10
+      DYNAMIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux32/bin/ -L$(UNIX_SLM_DIR)/linux32/bin/ -m32 -lc -ldl -lm -lpthread -lsulum$(UNIX_SULUM_VERSION)
+      STATIC_SLM_LNK = -Wl,-rpath $(UNIX_SLM_DIR)/linux32/bin/ -L$(UNIX_SLM_DIR)/linux32/bin/ -m32 -lc -ldl -lm -lpthread -lsulum$(UNIX_SULUM_VERSION)
     endif
   endif
   ifdef UNIX_GUROBI_DIR
@@ -216,9 +216,14 @@ ifeq ($(PLATFORM),LINUX)
   FLEX = dependencies/install/bin/flex
 endif  # LINUX
 ifeq ($(PLATFORM),MACOSX)
-  CCC = clang++ -fPIC -std=c++11
-  DYNAMIC_LD = ld -arch x86_64 -bundle -flat_namespace -undefined suppress -macosx_version_min 10.6 -lSystem -compatibility_version 1.0 -current_version $(OR_TOOLS_VERSION)
-  CMAKE = /Applications/CMake.app/Contents/bin/cmake
+  CCC = clang++ -fPIC -std=c++11 -mmacosx-version-min=$(MAC_MIN_VERSION) -stdlib=libc++
+  DYNAMIC_LD = ld -arch x86_64 -bundle -flat_namespace -undefined suppress -macosx_version_min $(MAC_MIN_VERSION) -lSystem -compatibility_version 1.0 -current_version $(OR_TOOLS_VERSION)
+  ifeq (, $(shell which cmake))
+    $(warning "no cmake in $(PATH), assuming it is in /Applications ")
+    CMAKE ?= /Applications/CMake.app/Contents/bin/cmake
+  endif
+  # CMAKE = /Applications/CMake.app/Contents/bin/cmake
+  
   JNI_LIB_EXT = jnilib
   ifeq ($(UNIX_MONO_DIR),)
     CSC = gmcs
@@ -247,7 +252,7 @@ ifeq ($(PLATFORM),MACOSX)
   STATIC_POST_LIB = .a
   DYNAMIC_LIB_SUFFIX = dylib
   DYNAMIC_SWIG_LIB_SUFFIX = so# To overcome a bug in Mac OS X loader.
-  DYNAMIC_LINK_CMD = ld -arch x86_64 -dylib -flat_namespace -undefined suppress -macosx_version_min 10.6 -lSystem -compatibility_version 1.0 -current_version $(OR_TOOLS_VERSION)
+  DYNAMIC_LINK_CMD = ld -arch x86_64 -dylib -flat_namespace -undefined suppress -macosx_version_min $(MAC_MIN_VERSION) -lSystem -compatibility_version 1.0 -current_version $(OR_TOOLS_VERSION)
   DYNAMIC_LINK_PREFIX = -o # Space needed.
   STATIC_LIB_SUFFIX = a
   STATIC_LINK_CMD = ar -r -v
@@ -281,6 +286,10 @@ ifeq ($(PLATFORM),MACOSX)
   ifdef UNIX_CPLEX_DIR
     STATIC_CPLEX_LNK = -force_load $(UNIX_CPLEX_DIR)/cplex/lib/x86-64_osx/static_pic/libcplex.a -lm -lpthread -framework CoreFoundation -framework IOKit
     DYNAMIC_CPLEX_LNK = $(STATIC_CPLEX_LNK)
+  endif
+  ifdef UNIX_SLM_DIR
+      DYNAMIC_SLM_LNK = -rpath $(UNIX_SLM_DIR)/mac64/bin/ -L$(UNIX_SLM_DIR)/mac64/bin/ -lc -ldl -lm -lpthread -lsulum$(UNIX_SULUM_VERSION)
+      STATIC_SLM_LNK = -rpath $(UNIX_SLM_DIR)/mac64/bin/ -L$(UNIX_SLM_DIR)/mac64/bin/ -lc -ldl -lm -lpthread -lsulum$(UNIX_SULUM_VERSION)
   endif
   BISON = dependencies/install/bin/bison
   FLEX = dependencies/install/bin/flex

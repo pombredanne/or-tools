@@ -25,9 +25,7 @@ setup(
         'ortools.linear_solver',],
     ext_modules = [dummy_module],
     install_requires = [
-        'google-apputils >= 0.4',
-        'protobuf >= 2.5.0'],
-    dependency_links = ['http://google-apputils-python.googlecode.com/files/'],
+        'protobuf >= 2.8.0'],
     package_data = {
         'ortools.constraint_solver' : ['_pywrapcp.dll'],
         'ortools.linear_solver' : ['_pywraplp.dll'],
@@ -42,8 +40,8 @@ setup(
     keywords = ('operations research, constraint programming, ' +
                 'linear programming,' + 'flow algorithms,' +
                 'python'),
-    url = 'http://code.google.com/p/or-tools/',
-    download_url = 'https://drive.google.com/#folders/0B2yUSpEp04BNdEU4QW5US1hvTzg',
+    url = 'https://developers.google.com/optimization/',
+    download_url = 'https://github.com/google/or-tools/releases',
     classifiers = [
         'Development Status :: 5 - Production/Stable',
         'Intended Audience :: Developers',
@@ -51,7 +49,6 @@ setup(
         'Operating System :: MacOS :: MacOS X',
         'Operating System :: Microsoft :: Windows',
         'Operating System :: POSIX :: Linux',
-        'Programming Language :: Python :: 2.6',
         'Programming Language :: Python :: 2.7',
         'Topic :: Office/Business :: Scheduling',
         'Topic :: Scientific/Engineering',

@@ -1,20 +1,21 @@
 # tags of dependencies to checkout.
 GFLAGS_TAG = 2.1.2
-PROTOBUF_TAG = 512 # version 2.5.0 + fix
-GOOGLE_APPUTILS_TAG = 14 # 0.4.0
-SPARSEHASH_TAG = 116 # 2.0.2
-CBC_TAG = 2.9.5
+PROTOBUF_TAG = 3.0.0-beta-1
+SPARSEHASH_TAG = 2.0.3
+CBC_TAG = 2.9.7
 ZLIB_TAG = 1.2.8
 ZLIB_ARCHIVE_TAG = 128
-SWIG_TAG = 3.0.5
+SWIG_TAG = 3.0.7
 BISON_FLEX_TAG = 2.5.5
 
 # Build extra dependencies (GLPK, SCIP) from archive only if the archive is present.
-# The archive should be glpk-4.55.tar.gz
-GLPK_TAG = 4.55
+# The archive should be glpk-4.57.tar.gz
+GLPK_TAG = 4.57
 # The archive should be scipoptsuite-3.2.0.tgz
 SCIP_TAG = 3.2.0
 SOPLEX_TAG = 2.2.0
+# Version of Sulum
+SULUM_TAG = 43
 
 # Detect if scip archive is there.
 ifeq ($(wildcard dependencies/archives/scipoptsuite-$(SCIP_TAG).tgz),)
@@ -80,7 +81,6 @@ build_third_party: \
 	missing_directories \
 	install_zlib \
 	install_gflags \
-	install_google_apputils \
 	install_protobuf \
 	install_sparsehash \
 	install_swig \
@@ -191,7 +191,6 @@ download_third_party: \
 	dependencies/sources/protobuf/autogen.sh \
 	dependencies/sources/sparsehash/autogen.sh \
 	dependencies/archives/swigwin-$(SWIG_TAG).zip \
-	dependencies/sources/google-apputils/README \
 	dependencies/sources/cbc-$(CBC_TAG)/configure
 
 # Directories:
@@ -200,31 +199,31 @@ install_directories: dependencies\install\bin dependencies\install\lib\coin depe
 
 dependencies\install\bin: dependencies\install
 ifeq ($(wildcard dependencies\install),)
-	tools\mkdir.exe dependencies\install\bin
+	-$(MKDIR_P) dependencies\install\bin
 endif
 
 dependencies\install\lib: dependencies\install
 ifeq ($(wildcard dependencies\install\lib),)
-	tools\mkdir.exe dependencies\install\lib
+	-$(MKDIR_P) dependencies\install\lib
 endif
 
 dependencies\install\lib\coin: dependencies\install\lib
 ifeq ($(wildcard dependencies\install\lib\coin),)
-	tools\mkdir.exe dependencies\install\lib\coin
+	-$(MKDIR_P) dependencies\install\lib\coin
 endif
 
 dependencies\install\include: dependencies\install
 ifeq ($(wildcard dependencies\install\include),)
-	tools\mkdir.exe dependencies\install\include
+	-$(MKDIR_P) dependencies\install\include
 endif
 
 dependencies\install\include\coin: dependencies\install\include
 ifeq ($(wildcard dependencies\install\include\coin),)
-	tools\mkdir.exe dependencies\install\include\coin
+	-$(MKDIR_P) dependencies\install\include\coin
 endif
 
 dependencies\install:
-	tools\mkdir.exe dependencies\install
+	-$(MKDIR_P) dependencies\install
 
 # Install zlib
 install_zlib: dependencies\install\include\zlib.h dependencies\install\include\zconf.h dependencies\install\lib\zlib.lib
@@ -249,7 +248,7 @@ dependencies\archives\zlib$(ZLIB_ARCHIVE_TAG).zip:
 
 install_gflags: dependencies/install/lib/gflags.lib
 
-dependencies/install/lib/gflags.lib: dependencies/sources/gflags-$(GFLAGS_TAG)/CMakeLists.txt
+dependencies/install/lib/gflags.lib: dependencies/sources/gflags-$(GFLAGS_TAG)/INSTALL.md
 	cd dependencies/sources/gflags-$(GFLAGS_TAG) && \
 	  $(CMAKE) -D CMAKE_INSTALL_PREFIX=..\..\install \
 	           -D CMAKE_BUILD_TYPE=Release \
@@ -258,68 +257,67 @@ dependencies/install/lib/gflags.lib: dependencies/sources/gflags-$(GFLAGS_TAG)/C
 	cd dependencies/sources/gflags-$(GFLAGS_TAG) && nmake install
 	$(TOUCH) dependencies/install/lib/gflags.lib
 
-dependencies/sources/gflags-$(GFLAGS_TAG)/CMakeLists.txt: dependencies/archives/gflags-$(GFLAGS_TAG).zip
+dependencies/sources/gflags-$(GFLAGS_TAG)/INSTALL.md: dependencies/archives/gflags-$(GFLAGS_TAG).zip
 	tools\unzip -d dependencies/sources dependencies\archives\gflags-$(GFLAGS_TAG).zip
-	$(TOUCH) dependencies\sources\gflags-$(GFLAGS_TAG)\CMakeLists.txt
+	$(TOUCH) dependencies\sources\gflags-$(GFLAGS_TAG)\INSTALL.md
 
 dependencies/archives/gflags-$(GFLAGS_TAG).zip:
 	tools\wget -P dependencies\archives --no-check-certificate https://github.com/schuhschuh/gflags/archive/v$(GFLAGS_TAG).zip
-	cd dependencies/archives && rename v$(GFLAGS_TAG) gflags-$(GFLAGS_TAG).zip
-
+	cd dependencies/archives && rename v$(GFLAGS_TAG).zip gflags-$(GFLAGS_TAG).zip
 
 
 # Install protocol buffers.
 install_protobuf: dependencies\install\bin\protoc.exe  dependencies\install\include\google\protobuf\message.h
 
-dependencies\install\bin\protoc.exe: dependencies\sources\protobuf\autogen.sh
-ifeq ("$(VisualStudioVersion)", "12.0")
-	tools\upgrade_to_vs2013.cmd dependencies\\solutions\\libprotobuf.vcxproj
-	tools\upgrade_to_vs2013.cmd dependencies\\solutions\\libprotobuf-lite.vcxproj
-	tools\upgrade_to_vs2013.cmd dependencies\\solutions\\libprotoc.vcxproj
-	tools\upgrade_to_vs2013.cmd dependencies\\solutions\\protoc.vcxproj
+dependencies\install\bin\protoc.exe: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\protoc.exe
+	copy dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\protoc.exe dependencies\install\bin
+	copy dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\*.lib dependencies\install\lib
+
+dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\Release\protoc.exe: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\protobuf.sln
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build && msbuild protobuf.sln /t:Build /p:Configuration=Release;LinkIncremental=false
+
+dependencies\install\include\google\protobuf\message.h: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\include.tar
+	cd dependencies\install && ..\..\tools\tar.exe xvmf ..\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\include.tar
+#	copy dependencies\sources\protobuf-$(PROTOBUF_TAG)\src\google\protobuf-$(PROTOBUF_TAG)\stubs\stl_util.h dependencies\install\include\google\protobuf-$(PROTOBUF_TAG)\stubs
+
+dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\include.tar: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\protobuf.sln
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build && extract_includes.bat
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build && ..\..\..\..\..\tools\tar.exe cf include.tar include
+
+dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build\protobuf.sln: dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\CMakeLists.txt
+	-md dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build
+	tools\sed -i -e '/\"\/MD\"/d' dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\CMakeLists.txt
+ifeq ("$(PTRLENGTH)", "64")
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build && cmake -G "Visual Studio 12 2013 Win64" -DBUILD_TESTING=OFF ..
+else
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\build && cmake -G "Visual Studio 12 2013" -DBUILD_TESTING=OFF ..
 endif
-	cd dependencies\solutions && msbuild protobuf.sln /t:Build /p:Configuration=Release;LinkIncremental=false
-ifeq ("$(VisualStudioVersion)", "12.0")
-	git checkout dependencies/solutions/libprotobuf.vcxproj
-	git checkout dependencies/solutions/libprotobuf-lite.vcxproj
-	git checkout dependencies/solutions/libprotoc.vcxproj
-	git checkout dependencies/solutions/protoc.vcxproj
-endif
 
+dependencies\sources\protobuf-$(PROTOBUF_TAG)\cmake\CMakeLists.txt:
+#	tools\wget -P dependencies\archives --no-check-certificate https://github.com/google/protobuf/release/download/v$(PROTOBUF_TAG)/protobuf-$(PROTOBUF_TAG).zip
+	tools\wget -P dependencies\archives --no-check-certificate https://github.com/google/protobuf/archive/v$(PROTOBUF_TAG).zip
+	tools\unzip -d dependencies\sources dependencies\archives\v$(PROTOBUF_TAG).zip
 
-dependencies\install\include\google\protobuf\message.h: dependencies\sources\protobuf\vsprojects\include.tar
-	cd dependencies\install && ..\..\tools\tar.exe xvmf ..\sources\protobuf\vsprojects\include.tar
-
-dependencies\sources\protobuf\vsprojects\include.tar: dependencies\sources\protobuf\autogen.sh
-	cd dependencies\sources\protobuf\vsprojects && extract_includes.bat
-	cd dependencies\sources\protobuf\vsprojects && ..\..\..\..\tools\tar.exe cvf include.tar include
-
-dependencies\sources\protobuf\autogen.sh:
-	svn co http://protobuf.googlecode.com/svn/trunk/ -r $(PROTOBUF_TAG) dependencies/sources/protobuf
-
-# Intall Google Apputils Python.
-install_google_apputils: dependencies\sources\google-apputils\README
-
-dependencies\sources\google-apputils\README:
-	svn co http://google-apputils-python.googlecode.com/svn/trunk/ -r $(GOOGLE_APPUTILS_TAG) dependencies/sources/google-apputils
 
 # Install sparsehash.
 install_sparsehash: dependencies\install\include\google\dense_hash_map
 
-dependencies\install\include\google\dense_hash_map: dependencies\sources\sparsehash\autogen.sh
+dependencies\install\include\google\dense_hash_map: dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\autogen.sh
 	-md dependencies\install\include\sparsehash
 	-md dependencies\install\include\sparsehash\internal
 	-md dependencies\install\include\google
 	-md dependencies\install\include\google\sparsehash
-	-copy dependencies\sources\sparsehash\src\sparsehash\* dependencies\install\include\sparsehash
-	-copy dependencies\sources\sparsehash\src\sparsehash\internal\* dependencies\install\include\sparsehash\internal
-	-copy dependencies\sources\sparsehash\src\google\* dependencies\install\include\google
-	-copy dependencies\sources\sparsehash\src\windows\google\* dependencies\install\include\google
-	-copy dependencies\sources\sparsehash\src\windows\google\sparsehash\* dependencies\install\include\google\sparsehash
-	-copy dependencies\sources\sparsehash\src\windows\sparsehash\internal\* dependencies\install\include\sparsehash\internal
+	-copy dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\src\sparsehash\* dependencies\install\include\sparsehash
+	-copy dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\src\sparsehash\internal\* dependencies\install\include\sparsehash\internal
+	-copy dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\src\google\* dependencies\install\include\google
+	-copy dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\src\windows\google\* dependencies\install\include\google
+	-copy dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\src\windows\google\sparsehash\* dependencies\install\include\google\sparsehash
+	-copy dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\src\windows\sparsehash\internal\* dependencies\install\include\sparsehash\internal
 
-dependencies\sources\sparsehash\autogen.sh:
-	svn co http://sparsehash.googlecode.com/svn/trunk/ -r $(SPARSEHASH_TAG) dependencies/sources/sparsehash
+dependencies\sources\sparsehash-sparsehash-$(SPARSEHASH_TAG)\autogen.sh:
+	tools\wget -P dependencies\archives --no-check-certificate https://github.com/sparsehash/sparsehash/archive/sparsehash-$(SPARSEHASH_TAG).zip
+	tools\unzip -d dependencies\sources dependencies\archives\sparsehash-$(SPARSEHASH_TAG).zip
+
 
 # Install Coin CBC.
 install_coin_cbc: dependencies\install\bin\cbc.exe
@@ -351,7 +349,7 @@ ifeq ("$(VisualStudioVersion)", "12.0")
 	tools\upgrade_to_vs2013.cmd dependencies\\sources\\cbc-$(CBC_TAG)\\CoinUtils\\MSVisualStudio\\v10\\libCoinUtils\\libCoinUtils.vcxproj
 	tools\upgrade_to_vs2013.cmd dependencies\\sources\\cbc-$(CBC_TAG)\\Cgl\\MSVisualStudio\\v10\\libCgl\\libCgl.vcxproj
 endif
-	sed -i 's/CBC_BUILD;/CBC_BUILD;CBC_THREAD_SAFE;CBC_NO_INTERRUPT/g' dependencies\\sources\\cbc-$(CBC_TAG)\\Cbc\\MSVisualStudio\\v10\\libCbcSolver\\libCbcSolver.vcxproj
+	sed -i 's/CBC_BUILD;/CBC_BUILD;CBC_THREAD_SAFE;CBC_NO_INTERRUPT;/g' dependencies\\sources\\cbc-$(CBC_TAG)\\Cbc\\MSVisualStudio\\v10\\libCbcSolver\\libCbcSolver.vcxproj
 	cd dependencies\sources\cbc-$(CBC_TAG)\Cbc\MSVisualStudio\v10 && msbuild Cbc.sln /t:cbc /p:Configuration=Release;BuildCmd=ReBuild
 
 dependencies\sources\cbc-$(CBC_TAG)\configure:
@@ -444,11 +442,10 @@ clean_third_party:
 makefile_third_party: Makefile.local
 
 # Install python modules
-install_python_modules:
-	cd dependencies\sources\google-apputils && $(WINDOWS_PYTHON_PATH)\\python.exe setup.py install --user
-	copy dependencies\install\bin\protoc.exe dependencies\sources\protobuf\src
-	cd dependencies\sources\protobuf/python && $(WINDOWS_PYTHON_PATH)\\python.exe setup.py build
-	cd dependencies\sources\protobuf/python && $(WINDOWS_PYTHON_PATH)\\python.exe setup.py install --user
+install_python_modules: install_protobuf
+	copy dependencies\install\bin\protoc.exe dependencies\sources\protobuf-$(PROTOBUF_TAG)\src
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)/python && $(WINDOWS_PYTHON_PATH)\\python.exe setup.py build
+	cd dependencies\sources\protobuf-$(PROTOBUF_TAG)/python && $(WINDOWS_PYTHON_PATH)\\python.exe setup.py install --user
 
 Makefile.local:
 	@echo Generating Makefile.local
@@ -462,6 +459,7 @@ Makefile.local:
 	@echo WINDOWS_CBC_DIR = $(OR_ROOT_FULL)\\dependencies\\install>> Makefile.local
 	@echo $(GLPK_MAKEFILE)>> Makefile.local
 	@echo $(SCIP_MAKEFILE)>> Makefile.local
+	@echo WINDOWS_SULUM_VERSION = $(SULUM_TAG) >> Makefile.local
 	@echo # Please define WINDOWS_SLM_DIR to use Sulum Optimization. >> Makefile.local
 	@echo # Please define WINDOWS_GUROBI_DIR and GUROBI_LIB_VERSION to use Gurobi. >> Makefile.local
 	@echo $(SELECTED_JDK_DEF)>> Makefile.local

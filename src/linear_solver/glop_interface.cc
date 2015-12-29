@@ -29,18 +29,16 @@
 
 #ifndef ANDROID_JNI
 #include "base/file.h"
+#include "google/protobuf/text_format.h"
 #endif
 
-#include "google/protobuf/text_format.h"
 #include "base/hash.h"
 #include "glop/lp_solver.h"
 #include "glop/parameters.pb.h"
 #include "linear_solver/linear_solver.h"
 #include "lp_data/lp_data.h"
 #include "lp_data/lp_types.h"
-
-DECLARE_double(solver_timeout_in_seconds);
-DECLARE_string(solver_write_model);
+#include "util/time_limit.h"
 
 namespace operations_research {
 
@@ -118,6 +116,7 @@ class GLOPInterface : public MPSolverInterface {
 
   // ----- Solve -----
   MPSolver::ResultStatus Solve(const MPSolverParameters& param) override;
+  bool InterruptSolve() override;
 
   // ----- Model modifications and extraction -----
   void Reset() override;
@@ -162,7 +161,7 @@ class GLOPInterface : public MPSolverInterface {
   void SetPresolveMode(int value) override;
   void SetScalingMode(int value) override;
   void SetLpAlgorithm(int value) override;
-  bool ReadParameterFile(const std::string& filename) override;
+  bool SetSolverSpecificParametersAsString(const std::string& parameters) override;
 
  private:
   void NonIncrementalChange();
@@ -172,6 +171,7 @@ class GLOPInterface : public MPSolverInterface {
   std::vector<MPSolver::BasisStatus> column_status_;
   std::vector<MPSolver::BasisStatus> row_status_;
   glop::GlopParameters parameters_;
+  bool interrupt_solver_;
 };
 
 GLOPInterface::GLOPInterface(MPSolver* const solver)
@@ -180,7 +180,8 @@ GLOPInterface::GLOPInterface(MPSolver* const solver)
       lp_solver_(),
       column_status_(),
       row_status_(),
-      parameters_() {}
+      parameters_(),
+      interrupt_solver_(false) {}
 
 GLOPInterface::~GLOPInterface() {}
 
@@ -203,7 +204,11 @@ MPSolver::ResultStatus GLOPInterface::Solve(const MPSolverParameters& param) {
   solver_->SetSolverSpecificParametersAsString(
       solver_->solver_specific_parameter_string_);
   lp_solver_.SetParameters(parameters_);
-  const glop::ProblemStatus status = lp_solver_.Solve(linear_program_);
+  std::unique_ptr<TimeLimit> time_limit =
+      TimeLimit::FromParameters(parameters_);
+  time_limit->RegisterExternalBooleanAsLimit(&interrupt_solver_);
+  const glop::ProblemStatus status =
+      lp_solver_.SolveWithTimeLimit(linear_program_, time_limit.get());
 
   // The solution must be marked as synchronized even when no solution exists.
   sync_status_ = SOLUTION_SYNCHRONIZED;
@@ -247,9 +252,15 @@ MPSolver::ResultStatus GLOPInterface::Solve(const MPSolverParameters& param) {
   return result_status_;
 }
 
+bool GLOPInterface::InterruptSolve() {
+  interrupt_solver_ = true;
+  return true;
+}
+
 void GLOPInterface::Reset() {
   ResetExtractionInformation();
   linear_program_.Clear();
+  interrupt_solver_ = false;
 }
 
 void GLOPInterface::SetOptimizationDirection(bool maximize) {
@@ -460,15 +471,16 @@ void GLOPInterface::SetLpAlgorithm(int value) {
   }
 }
 
-bool GLOPInterface::ReadParameterFile(const std::string& filename) {
+bool GLOPInterface::SetSolverSpecificParametersAsString(
+    const std::string& parameters) {
 #ifdef ANDROID_JNI
+  // NOTE(user): Android build uses protocol buffers in lite mode, and
+  // parsing data from text format is not supported there. To allow solver
+  // specific parameters from std::string on Android, we first need to switch to
+  // non-lite version of protocol buffers.
   return false;
 #else
-  std::string params;
-  if (!file::GetContents(filename, &params, file::Defaults()).ok()) {
-    return false;
-  }
-  const bool ok = google::protobuf::TextFormat::MergeFromString(params, &parameters_);
+  const bool ok = google::protobuf::TextFormat::MergeFromString(parameters, &parameters_);
   lp_solver_.SetParameters(parameters_);
   return ok;
 #endif

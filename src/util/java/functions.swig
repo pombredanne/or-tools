@@ -15,6 +15,7 @@
 // parameters. Currently, swig does not support much of C++11 features, and
 // especially not the std::function.
 
+//
 // Java callers will need to use a specific "type" of callbacks: they must
 // specialize one of the existing generic callback classes defined in
 // ../functions_swig_helpers.h (which are SWIG-wrapped to Java in a
@@ -87,7 +88,7 @@
   // EXPANSION EXAMPLE: "int64 i0, bool i1".
   $1 = [fun](INSERT_NAMES(NumArgs)(Args))  {
     // EXPANSION EXAMPLE: "i0, i1".
-    return fun->run(NAMES(NumArgs));
+    return fun->Run(NAMES(NumArgs));
   };
 }
 
@@ -121,19 +122,20 @@ WRAP_STD_FUNCTION_JAVA_AUX(Package, "CppClass", CppClass, ReturnType,
 
 // --------- VoidToString ---------
 
+%define WRAP_OTHER_FUNCTIONS_JAVA(ClassPath) 
 %typemap(in) std::function<std::string()> {
   jclass object_class =
-    jenv->FindClass("com/google/ortools/util/VoidToString");
+    jenv->FindClass(ClassPath "VoidToString");
   if (nullptr == object_class) return $null;
   jmethodID method_id =
       jenv->GetStaticMethodID(object_class, "getCPtr",
-          "(Lcom/google/ortools/util/VoidToString;)J");
+          "(L" ClassPath "VoidToString;)J");
   assert(method_id != nullptr);
   operations_research::swig_util::VoidToString* const fun =
       reinterpret_cast<operations_research::swig_util::VoidToString*>(
           jenv->CallStaticLongMethod(object_class, method_id, $input));
   $1 = [fun]() {
-    return fun->run();
+    return fun->Run();
   };
 }
 
@@ -145,21 +147,20 @@ WRAP_STD_FUNCTION_JAVA_AUX(Package, "CppClass", CppClass, ReturnType,
 // This typemap handles the conversion of the jstype to jtype typemap types
 %typemap(javain) std::function<std::string()> "$javainput"
 
-
 // --------- VoidToVoid ---------
 
 %typemap(in) std::function<void()> {
   jclass object_class =
-    jenv->FindClass("com/google/ortools/util/VoidToVoid");
+    jenv->FindClass(ClassPath "VoidToVoid");
   if (nullptr == object_class) return $null;
   jmethodID method_id =
       jenv->GetStaticMethodID(object_class, "getCPtr",
-          "(Lcom/google/ortools/util/VoidToVoid;)J");
+          "(L" ClassPath "VoidToVoid;)J");
   assert(method_id != nullptr);
   operations_research::swig_util::VoidToVoid* const fun =
       reinterpret_cast<operations_research::swig_util::VoidToVoid*>(
           jenv->CallStaticLongMethod(object_class, method_id, $input));
-  $1 = [fun]() { fun->run(); };
+  $1 = [fun]() { fun->Run(); };
 }
 
 // These 3 typemaps tell SWIG what JNI and Java types to use
@@ -174,16 +175,16 @@ WRAP_STD_FUNCTION_JAVA_AUX(Package, "CppClass", CppClass, ReturnType,
 
 %typemap(in) std::function<void(int64)> {
   jclass object_class =
-    jenv->FindClass("com/google/ortools/util/LongToVoid");
+    jenv->FindClass(ClassPath "LongToVoid");
   if (nullptr == object_class) return $null;
   jmethodID method_id =
       jenv->GetStaticMethodID(object_class, "getCPtr",
-          "(Lcom/google/ortools/util/LongToVoid;)J");
+          "(L" ClassPath "LongToVoid;)J");
   assert(method_id != nullptr);
   operations_research::swig_util::LongToVoid* const fun =
       reinterpret_cast<operations_research::swig_util::LongToVoid*>(
           jenv->CallStaticLongMethod(object_class, method_id, $input));
-  $1 = [fun](int64 i) { fun->run(i); };
+  $1 = [fun](int64 i) { fun->Run(i); };
 }
 
 // These 3 typemaps tell SWIG what JNI and Java types to use
@@ -193,6 +194,32 @@ WRAP_STD_FUNCTION_JAVA_AUX(Package, "CppClass", CppClass, ReturnType,
 
 // This typemap handles the conversion of the jstype to jtype typemap types
 %typemap(javain) std::function<void(int64)> "$javainput"
+%enddef  // WRAP_OTHER_FUNCTIONS_JAVA
+
+%define WRAP_CLASS_TO_VOID_JAVA(ClassPath, CppClass, Parameter)
+%typemap(in) std::function<void(operations_research::Parameter*)> {
+  jclass object_class = jenv->FindClass(ClassPath CppClass);
+  if (nullptr == object_class) return $null;
+  jmethodID method_id = jenv->GetStaticMethodID(
+      object_class, "getCPtr", "(L" ClassPath CppClass";)J");
+  assert(method_id != nullptr);
+  operations_research::swig_util::CppClass* const fun =
+      reinterpret_cast<operations_research::swig_util::CppClass*>(
+          jenv->CallStaticLongMethod(object_class, method_id, $input));
+  $1 = [fun](Parameter* param) { fun->Run(param); };
+}
+
+// These 3 typemaps tell SWIG what JNI and Java types to use
+%typemap(jni) std::function<void(operations_research::Parameter*)> "jobject"
+%typemap(jtype) std::function<void(operations_research::Parameter*)> "CppClass"
+%typemap(jstype) std::function<void(operations_research::Parameter*)> "CppClass"
+
+// This typemap handles the conversion of the jstype to jtype typemap types
+%typemap(javain) std::function<void(operations_research::Parameter*)> "$javainput"
+
+%feature("director") operations_research::swig_util::CppClass;
+%rename (run) operations_research::swig_util::CppClass::Run;
+%enddef  // WRAP_CLASS_TO_VOID_JAVA
 
 // directors
 
@@ -202,15 +229,23 @@ WRAP_STD_FUNCTION_JAVA_AUX(Package, "CppClass", CppClass, ReturnType,
 // We cannot use %ignoreall/%unignoreall as this is not compatible with nested
 // swig files.
 
-%feature("director") operations_research::swig_util::IntIntToLong;
-%feature("director") operations_research::swig_util::LongLongLongToBoolean;
-%feature("director") operations_research::swig_util::LongLongLongToLong;
-%feature("director") operations_research::swig_util::LongLongToLong;
-%feature("director") operations_research::swig_util::LongToBoolean;
 %feature("director") operations_research::swig_util::LongToLong;
-%feature("director") operations_research::swig_util::LongToVoid;
-%feature("director") operations_research::swig_util::VoidToBoolean;
+%rename (run) operations_research::swig_util::LongToLong::Run;
+%feature("director") operations_research::swig_util::LongLongToLong;
+%rename (run) operations_research::swig_util::LongLongToLong::Run;
+%feature("director") operations_research::swig_util::IntIntToLong;
+%rename (run) operations_research::swig_util::IntIntToLong::Run;
+%feature("director") operations_research::swig_util::LongLongLongToLong;
+%rename (run) operations_research::swig_util::LongLongLongToLong::Run;
+%feature("director") operations_research::swig_util::LongToBoolean;
+%rename (run) operations_research::swig_util::LongToBoolean::Run;
 %feature("director") operations_research::swig_util::VoidToString;
-%feature("director") operations_research::swig_util::VoidToVoid;
+%rename (run) operations_research::swig_util::VoidToString::Run;
+%feature("director") operations_research::swig_util::VoidToBoolean;
+%rename (run) operations_research::swig_util::VoidToBoolean::Run;
+%feature("director") operations_research::swig_util::LongLongLongToBoolean;
+%rename (run) operations_research::swig_util::LongLongLongToBoolean::Run;
+%feature("director") operations_research::swig_util::LongToVoid;
+%rename (run) operations_research::swig_util::LongToVoid::Run;
 
 %include "util/functions_swig_helpers.h"

@@ -41,8 +41,6 @@
 // not be worth it.
 #define ORTOOLS_SCIP_CALL(x) CHECK_EQ(SCIP_OKAY, x)
 
-DECLARE_double(solver_timeout_in_seconds);
-DECLARE_string(solver_write_model);
 DEFINE_bool(scip_feasibility_emphasis, false,
             "When true, emphasize search towards feasibility. This may or"
             " may not result in speedups in some problems.");
@@ -490,11 +488,14 @@ MPSolver::ResultStatus SCIPInterface::Solve(const MPSolverParameters& param) {
     ORTOOLS_SCIP_CALL(SCIPresetParam(scip_, "limits/time"));
   }
 
-  // TODO(user): clarify the differences and the precedence between the two
-  // SetParameter*() API (file-based and generic, parameter-based).
+  // We first set our internal MPSolverParameters from param and then set
+  // any user specified internal solver, ie. SCIP, parameters via
+  // solver_specific_parameter_string_.
+  // Default MPSolverParameters can override custom parameters (for example for
+  // presolving) and therefore we apply MPSolverParameters first.
+  SetParameters(param);
   solver_->SetSolverSpecificParametersAsString(
       solver_->solver_specific_parameter_string_);
-  SetParameters(param);
 
   // Use the solution hint if any.
   // Note that SCIP will only use this if it is a feasible solution.

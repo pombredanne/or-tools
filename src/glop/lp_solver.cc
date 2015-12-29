@@ -30,7 +30,10 @@
 #include "lp_data/lp_types.h"
 #include "lp_data/lp_utils.h"
 #include "util/fp_utils.h"
+
+#ifndef ANDROID_JNI
 #include "util/proto_tools.h"
+#endif
 
 DEFINE_bool(lp_solver_enable_fp_exceptions, false,
             "When true, NaNs and division / zero produce errors. "
@@ -80,7 +83,10 @@ void DumpLinearProgramIfRequiredByFlags(const LinearProgram& linear_program,
   const std::string filespec = StrCat(FLAGS_lp_dump_dir, "/", filename);
   MPModelProto proto;
   LinearProgramToMPModelProto(linear_program, &proto);
-  if (!WriteProtoToFile(filespec, proto, FLAGS_lp_dump_binary_file,
+  const ProtoWriteFormat write_format = FLAGS_lp_dump_binary_file
+                                            ? ProtoWriteFormat::kProtoBinary
+                                            : ProtoWriteFormat::kProtoText;
+  if (!WriteProtoToFile(filespec, proto, write_format,
                         FLAGS_lp_dump_compressed_file)) {
     LOG(DFATAL) << "Could not write " << filespec;
   }
@@ -102,8 +108,17 @@ void LPSolver::SetParameters(const GlopParameters& parameters) {
 const GlopParameters& LPSolver::GetParameters() const { return parameters_; }
 
 ProblemStatus LPSolver::Solve(const LinearProgram& lp) {
-  TimeLimit time_limit(parameters_.max_time_in_seconds());
+  std::unique_ptr<TimeLimit> time_limit =
+      TimeLimit::FromParameters(parameters_);
+  return SolveWithTimeLimit(lp, time_limit.get());
+}
 
+ProblemStatus LPSolver::SolveWithTimeLimit(const LinearProgram& lp,
+                                           TimeLimit* time_limit) {
+  if (time_limit == nullptr) {
+    LOG(DFATAL) << "SolveWithTimeLimit() called with a nullptr time_limit.";
+    return ProblemStatus::ABNORMAL;
+  }
   ++num_solves_;
   num_revised_simplex_iterations_ = 0;
 #ifndef ANDROID_JNI
@@ -144,9 +159,10 @@ ProblemStatus LPSolver::Solve(const LinearProgram& lp) {
 
   // Preprocess.
   MainLpPreprocessor preprocessor;
-  parameters_.set_max_time_in_seconds(time_limit.GetTimeLeft());
   preprocessor.SetParameters(parameters_);
-  const bool postsolve_is_needed = preprocessor.Run(&current_linear_program_);
+
+  const bool postsolve_is_needed = preprocessor.Run(&current_linear_program_,
+                                                    time_limit);
 
   // At this point, we need to initialize a ProblemSolution with the correct
   // size and status.
@@ -154,9 +170,7 @@ ProblemStatus LPSolver::Solve(const LinearProgram& lp) {
                            current_linear_program_.num_variables());
   solution.status = preprocessor.status();
 
-  // TODO(user): find a cleaner way to pass around the time left.
-  parameters_.set_max_time_in_seconds(time_limit.GetTimeLeft());
-  RunRevisedSimplexIfNeeded(&solution);
+  RunRevisedSimplexIfNeeded(&solution, time_limit);
 
   if (postsolve_is_needed) preprocessor.RecoverSolution(&solution);
   return LoadAndVerifySolution(lp, solution);
@@ -224,6 +238,7 @@ ProblemStatus LPSolver::LoadAndVerifySolution(const LinearProgram& lp,
 
   ComputeReducedCosts(lp);
   ComputeConstraintActivities(lp);
+
 
   // These will be set to true if the associated "infeasibility" is too large.
   //
@@ -377,6 +392,7 @@ int LPSolver::GetNumberOfSimplexIterations() const {
   return num_revised_simplex_iterations_;
 }
 
+
 double LPSolver::DeterministicTime() const {
   return revised_simplex_ == nullptr ? 0.0
                                      : revised_simplex_->DeterministicTime();
@@ -433,7 +449,8 @@ void LPSolver::ResizeSolution(RowIndex num_rows, ColIndex num_cols) {
   constraint_statuses_.resize(num_rows, ConstraintStatus::FREE);
 }
 
-void LPSolver::RunRevisedSimplexIfNeeded(ProblemSolution* solution) {
+void LPSolver::RunRevisedSimplexIfNeeded(ProblemSolution* solution,
+                                         TimeLimit* time_limit) {
   // Note that the transpose matrix is no longer needed at this point.
   // This helps reduce the peak memory usage of the solver.
   current_linear_program_.ClearTransposeMatrix();
@@ -442,7 +459,7 @@ void LPSolver::RunRevisedSimplexIfNeeded(ProblemSolution* solution) {
     revised_simplex_.reset(new RevisedSimplex());
   }
   revised_simplex_->SetParameters(parameters_);
-  if (revised_simplex_->Solve(current_linear_program_).ok()) {
+  if (revised_simplex_->Solve(current_linear_program_, time_limit).ok()) {
     num_revised_simplex_iterations_ = revised_simplex_->GetNumberOfIterations();
     solution->status = revised_simplex_->GetProblemStatus();
 
@@ -466,6 +483,7 @@ void LPSolver::RunRevisedSimplexIfNeeded(ProblemSolution* solution) {
     solution->status = ProblemStatus::ABNORMAL;
   }
 }
+
 
 namespace {
 

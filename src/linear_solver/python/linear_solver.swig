@@ -30,6 +30,15 @@
 %include "base/base.swig"
 
 
+// We need to forward-declare the proto here, so that the PROTO_* macros
+// involving them work correctly. The order matters very much: this declaration
+// needs to be before the %{ #include ".../linear_solver.h" %}.
+namespace operations_research {
+class MPModelProto;
+class MPModelRequest;
+class MPSolutionResponse;
+}  // namespace operations_research
+
 %{
 #include "linear_solver/linear_solver.pb.h"
 #include "linear_solver/linear_solver.h"
@@ -38,6 +47,7 @@
 namespace operations_research {
 
 %pythoncode {
+import numbers
 from ortools.linear_solver.linear_solver_natural_api import LinearExpr
 from ortools.linear_solver.linear_solver_natural_api import ProductCst
 from ortools.linear_solver.linear_solver_natural_api import Sum
@@ -59,44 +69,47 @@ from ortools.linear_solver.linear_solver_natural_api import LinearConstraint
   // particular, SWIG's %define won't work because they get prepended with a
   // C-style comment "/*...*/" upon expansion, which breaks the python code.
   %pythoncode {
+  def IsConstant(self, expr):
+    return isinstance(expr, numbers.Number)
+
   def __add__(self, expr):
-    if isinstance(expr, (int, long, float)):
+    if self.IsConstant(expr):
       return SumCst(self, expr)
     else:
       return Sum(self, expr)
 
   def __radd__(self, cst):
-    if isinstance(cst, (int, long, float)):
+    if self.IsConstant(cst):
       return SumCst(self, cst)
     else:
       raise TypeError
 
   def __sub__(self, expr):
-    if isinstance(expr, (int, long, float)):
+    if self.IsConstant(expr):
       return SumCst(self, -expr)
     else:
       return Sum(self, ProductCst(expr, -1))
 
   def __rsub__(self, cst):
-    if isinstance(cst, (int, long, float)):
+    if self.IsConstant(cst):
       return SumCst(ProductCst(self, -1), cst)
     else:
       raise TypeError
 
   def __mul__(self, cst):
-    if isinstance(cst, (int, long, float)):
+    if self.IsConstant(cst):
       return ProductCst(self, cst)
     else:
       raise TypeError
 
   def __rmul__(self, cst):
-    if isinstance(cst, (int, long, float)):
+    if self.IsConstant(cst):
       return ProductCst(self, cst)
     else:
       raise TypeError
 
   def __div__(self, cst):
-    if isinstance(cst, (int, long, float)):
+    if self.IsConstant(cst):
       if cst == 0.0:
         raise ZeroDivisionError
       else:
@@ -105,7 +118,7 @@ from ortools.linear_solver.linear_solver_natural_api import LinearConstraint
       raise TypeError
 
   def __truediv__(self, cst):
-    if isinstance(cst, (int, long, float)):
+    if self.IsConstant(cst):
       if cst == 0.0:
         raise ZeroDivisionError
       else:
@@ -117,19 +130,22 @@ from ortools.linear_solver.linear_solver_natural_api import LinearConstraint
     return ProductCst(self, -1)
 
   def __eq__(self, arg):
-    if isinstance(arg, (int, long, float)):
+    if self.IsConstant(arg):
       return LinearConstraint(self, arg, arg)
     else:
       return LinearConstraint(Sum(self, ProductCst(arg, -1)), 0.0, 0.0)
 
+  def __hash__(self):
+    return object.__hash__(self)
+
   def __ge__(self, arg):
-    if isinstance(arg, (int, long, float)):
+    if self.IsConstant(arg):
       return LinearConstraint(self, arg, 1e308)
     else:
       return LinearConstraint(Sum(self, ProductCst(arg, -1)), 0.0, 1e308)
 
   def __le__(self, arg):
-    if isinstance(arg, (int, long, float)):
+    if self.IsConstant(arg):
       return LinearConstraint(self, -1e308, arg)
     else:
       return LinearConstraint(Sum(self, ProductCst(arg, -1)), -1e308, 0.0)
@@ -190,21 +206,27 @@ from ortools.linear_solver.linear_solver_natural_api import LinearConstraint
     objective = self.Objective()
     objective.Clear()
     objective.SetMinimization()
-    coeffs = {}
-    offset = expr.Visit(coeffs)
-    objective.AddOffset(offset)
-    for v, c, in coeffs.iteritems():
-      objective.SetCoefficient(v, float(c))
+    if isinstance(expr, numbers.Number):
+        objective.AddOffset(expr)
+    else:
+        coeffs = {}
+        offset = expr.Visit(coeffs)
+        objective.AddOffset(offset)
+        for v, c, in iter(coeffs.items()):
+          objective.SetCoefficient(v, float(c))
 
   def Maximize(self, expr):
     objective = self.Objective()
     objective.Clear()
     objective.SetMaximization()
-    coeffs = {}
-    offset = expr.Visit(coeffs)
-    objective.AddOffset(offset)
-    for v, c, in coeffs.iteritems():
-      objective.SetCoefficient(v, float(c))
+    if isinstance(expr, numbers.Number):
+        objective.AddOffset(expr)
+    else:
+        coeffs = {}
+        offset = expr.Visit(coeffs)
+        objective.AddOffset(offset)
+        for v, c, in iter(coeffs.items()):
+          objective.SetCoefficient(v, float(c))
   }  // %pythoncode
 }
 
@@ -289,6 +311,7 @@ from ortools.linear_solver.linear_solver_natural_api import LinearConstraint
 
 
 // Expose some of the more advanced MPSolver API.
+%unignore operations_research::MPSolver::InterruptSolve;
 %unignore operations_research::MPSolver::SupportsProblemType;  // No unit test
 %unignore operations_research::MPSolver::wall_time;  // No unit test
 %unignore operations_research::MPSolver::Clear;  // No unit test
@@ -358,7 +381,6 @@ from ortools.linear_solver.linear_solver_natural_api import LinearConstraint
 
 // MPSolverParameters API. For expert users only.
 // TODO(user): also strip "MP" from the class name.
-// TODO(user): unit test all of it.
 %unignore operations_research::MPSolverParameters;
 %unignore operations_research::MPSolverParameters::MPSolverParameters;
 %unignore operations_research::MPSolverParameters::DoubleParam;

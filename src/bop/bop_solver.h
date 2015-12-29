@@ -72,6 +72,11 @@ class BopSolver {
   BopSolveStatus Solve();
   BopSolveStatus Solve(const BopSolution& first_solution);
 
+  // Runs the solver with an external time limit.
+  BopSolveStatus SolveWithTimeLimit(TimeLimit* time_limit);
+  BopSolveStatus SolveWithTimeLimit(const BopSolution& first_solution,
+                                    TimeLimit* time_limit);
+
   const BopSolution& best_solution() const { return problem_state_.solution(); }
   bool GetSolutionValue(VariableIndex var_id) const {
     return problem_state_.solution().Value(var_id);
@@ -83,20 +88,14 @@ class BopSolver {
   double GetScaledBestBound() const;
   double GetScaledGap() const;
 
-  // Sets an external limit to stop the search when the Boolean value becomes
-  // true. Note that the Solve() call may still linger for a while depending on
-  // the conditions.
-  void RegisterExternalBooleanAsLimit(const bool* external_boolean_as_limit);
-
  private:
   void UpdateParameters();
-  BopSolveStatus InternalMonothreadSolver();
-  BopSolveStatus InternalMultithreadSolver();
+  BopSolveStatus InternalMonothreadSolver(TimeLimit* time_limit);
+  BopSolveStatus InternalMultithreadSolver(TimeLimit* time_limit);
 
   const LinearBooleanProblem& problem_;
   ProblemState problem_state_;
   BopParameters parameters_;
-  const bool* external_boolean_as_limit_;
 
   mutable StatsGroup stats_;
 };

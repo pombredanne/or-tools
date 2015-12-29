@@ -20,26 +20,10 @@
 #include "constraint_solver/routing.h"
 %}
 
-// We "convert" the C++ flags to python gflags. We also need to actually
-// pass the value from the python flags to the C++ ones, upon the
-// RoutingModel construction. This is a copy paste of the same code on the
-// Solver class in ./constraint_solver.swig.
-
-// As with the solver ctor, at the beginning of the routing model's
-// constructor code (in python), call SetFlags() with the python flags
-// as parameters.
-// Note: Indentation is critical here as the code is copied verbatim in the
-// python code.
-%feature("pythonprepend") operations_research::RoutingModel::RoutingModel %{
-        Solver.SetFlags(FLAGS.cp_trace_propagation,
-                        FLAGS.cp_trace_search,
-                        FLAGS.cp_print_model,
-                        FLAGS.cp_model_stats,
-                        FLAGS.cp_export_file,
-                        FLAGS.cp_no_solve,
-                        FLAGS.cp_profile_file)
-%}
-
+// See ./constraint_solver_helpers.swig.
+//PY_CONVERT_HELPER_PTR(SearchMonitor);
+//PY_CONVERT_HELPER_PTR(IntervalVar);
+//PY_CONVERT_HELPER_INTEXPR_OR_INTVAR(IntVar);
 
 // Convert RoutingModel::NodeIndex to (32-bit signed) integers.
 %typemap(in) operations_research::RoutingModel::NodeIndex {
@@ -107,6 +91,67 @@ bool PyObjAs(PyObject* py_obj,
 // a vector of NodeEvaluator2*.
 PY_LIST_OUTPUT_TYPEMAP(operations_research::RoutingModel::NodeEvaluator2*,
                        PyCallable_Check, );
+
+// Support std::vector<std::vector<operations_research::RoutingModel::NodeIndex>>& as parameter.
+%typemap(in) const std::vector<std::vector<operations_research::RoutingModel::NodeIndex> >&
+    (std::vector<std::vector<operations_research::RoutingModel::NodeIndex> > temp) {
+  if (!PyList_Check($input)) {
+    PyErr_SetString(PyExc_TypeError, "Expecting a list of tuples");
+    SWIG_fail;
+  }
+  int len = PyList_Size($input);
+  if (len > 0) {
+    temp.resize(len);
+    for (size_t i = 0; i < len; ++i) {
+      PyObject *tuple = PyList_GetItem($input, i);
+      if (!PyTuple_Check(tuple) && !PyList_Check(tuple)) {
+        PyErr_SetString(PyExc_TypeError, "Expecting a sequence");
+        SWIG_fail;
+      }
+      bool is_tuple = PyTuple_Check(tuple);
+      int arity = is_tuple ? PyTuple_Size(tuple) : PyList_Size(tuple);
+      temp[i].resize(arity);
+      for (size_t j = 0; j < arity; ++j) {
+        temp[i][j] = operations_research::RoutingModel::NodeIndex(
+            PyInt_AsLong(is_tuple ? PyTuple_GetItem(tuple, j)
+                                  : PyList_GetItem(tuple, j)));
+      }
+    }
+  }
+  $1 = &temp;
+}
+
+%typecheck(SWIG_TYPECHECK_POINTER)
+    const std::vector<std::vector<operations_research::RoutingModel::NodeIndex> >& {
+  if (!PyList_Check($input)) {
+    $1 = 0;
+  } else {
+    const int size = PyList_Size($input);
+    bool failed = false;
+    for (size_t i = 0; i < size; ++i) {
+      PyObject* const tuple = PyList_GetItem($input, i);
+      if (!PyTuple_Check(tuple) && !PyList_Check(tuple)) {
+        $1 = 0;
+        break;
+      } else {
+        const bool is_tuple = PyTuple_Check(tuple);
+        const int arity = is_tuple ? PyTuple_Size(tuple) : PyList_Size(tuple);
+        for (size_t j = 0; j < arity; ++j) {
+          PyObject* const entry =
+              is_tuple ? PyTuple_GetItem(tuple, j) : PyList_GetItem(tuple, j);
+          if (!PyInt_Check(entry) && !PyLong_Check(entry)) {
+            failed = true;
+            break;
+          }
+        }
+      }
+      if (failed) {
+        break;
+      }
+    }
+    $1 = failed ? 0 : 1;
+  }
+}
 
 %ignore operations_research::RoutingModel::AddVectorDimension(
     const int64* values,

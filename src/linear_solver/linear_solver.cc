@@ -47,7 +47,9 @@
 #include "linear_solver/model_exporter.h"
 #include "linear_solver/model_validator.h"
 #include "util/fp_utils.h"
+#ifndef ANDROID_JNI
 #include "util/proto_tools.h"
+#endif
 
 DEFINE_bool(verify_solution, false,
             "Systematically verify the solution when calling Solve()"
@@ -72,7 +74,7 @@ DEFINE_bool(mpsolver_bypass_model_validation, false,
 // operations_research namespace in open_source/base).
 namespace operations_research {
 
-#ifdef ANDROID_JNI
+#if defined(ANDROID_JNI) && (defined(__ANDROID__) || defined(__APPLE__))
 // Enum -> std::string conversions are not present in MessageLite that is being used
 // on Android.
 std::string MPSolverResponseStatus_Name(int status) {
@@ -82,7 +84,7 @@ std::string MPSolverResponseStatus_Name(int status) {
 std::string MPModelRequest_SolverType_Name(int type) {
   return SimpleItoa(type);
 }
-#endif  // ANDROID_JNI
+#endif  // defined(ANDROID_JNI) && (defined(__ANDROID__) || defined(__APPLE__))
 
 double MPConstraint::GetCoefficient(const MPVariable* const var) const {
   DLOG_IF(DFATAL, !interface_->solver_->OwnsVariable(var)) << var;
@@ -289,55 +291,8 @@ void* MPSolver::underlying_solver() { return interface_->underlying_solver(); }
 // ---- Solver-specific parameters ----
 
 bool MPSolver::SetSolverSpecificParametersAsString(const std::string& parameters) {
-#ifdef ANDROID_JNI
-  // This is not implemented on Android because there is no default /tmp and a
-  // pointer to the Java environment is require to query for the application
-  // folder or the location of external storage (if any).
-  return false;
-#else
-  if (parameters.empty()) return true;
   solver_specific_parameter_string_ = parameters;
-
-  // Note(user): this method needs to return a success/failure boolean
-  // immediately, so we also perform the actual parameter parsing right away.
-  // Some implementations will keep them forever and won't need to re-parse
-  // them; some (eg. SCIP, Gurobi) need to re-parse the parameters every time
-  // they do Solve(). We just store the parameters std::string anyway.
-  std::string extension = interface_->ValidFileExtensionForParameterFile();
-  #if defined(__linux)
-    int32 tid = static_cast<int32>(pthread_self());
-  #else  // defined(__linux__)
-    int32 tid = 123;
-  #endif  // defined(__linux__)
-  #if !defined(_MSC_VER)
-    int32 pid = static_cast<int32>(getpid());
-  #else  // _MSC_VER
-    int32 pid = 456;
-  #endif  // _MSC_VER
-    int64 now = base::GetCurrentTimeNanos();
-    std::string filename = StringPrintf("/tmp/parameters-tempfile-%x-%d-%llx%s",
-        tid, pid, now, extension.c_str());
-    bool no_error_so_far = true;
-  if (no_error_so_far) {
-    no_error_so_far =
-        file::SetContents(filename, parameters, file::Defaults()).ok();
-  }
-  if (no_error_so_far) {
-    no_error_so_far = interface_->ReadParameterFile(filename);
-    // We need to clean up the file even if ReadParameterFile() returned
-    // false. In production we can continue even if the deletion failed.
-    if (!File::Delete(filename)) {
-      LOG(DFATAL) << "Couldn't delete temporary parameters file: " << filename;
-    }
-  }
-  if (!no_error_so_far) {
-    LOG(WARNING) << "Error in SetSolverSpecificParametersAsString() "
-                 << "for solver type: "
-                 << MPModelRequest::SolverType_Name(
-                        static_cast<MPModelRequest::SolverType>(ProblemType()));
-  }
-  return no_error_so_far;
-#endif
+  return interface_->SetSolverSpecificParametersAsString(parameters);
 }
 
 // ----- Solver -----
@@ -512,6 +467,25 @@ MPConstraint* MPSolver::LookupConstraintOrNull(const std::string& constraint_nam
 
 MPSolverResponseStatus MPSolver::LoadModelFromProto(
     const MPModelProto& input_model, std::string* error_message) {
+  // The variable and constraint names are dropped, because we allow
+  // duplicate names in the proto (they're not considered as 'ids'),
+  // unlike the MPSolver C++ API which crashes if there are duplicate names.
+  // Clearing the names makes the MPSolver generate unique names.
+  //
+  // TODO(user): This limits the number of variables and constraints to 10^9:
+  // we should fix that.
+  return LoadModelFromProtoInternal(input_model, /*clear_names=*/true,
+                                    error_message);
+}
+
+MPSolverResponseStatus MPSolver::LoadModelFromProtoWithUniqueNamesOrDie(
+    const MPModelProto& input_model, std::string* error_message) {
+  return LoadModelFromProtoInternal(input_model, /*clear_names=*/false,
+                                    error_message);
+}
+
+MPSolverResponseStatus MPSolver::LoadModelFromProtoInternal(
+    const MPModelProto& input_model, bool clear_names, std::string* error_message) {
   CHECK(error_message != nullptr);
   const std::string error = FindErrorInMPModelProto(input_model);
   if (!error.empty()) {
@@ -528,26 +502,23 @@ MPSolverResponseStatus MPSolver::LoadModelFromProto(
     }
   }
 
-  // The variable and constraint names are dropped, because we allow
-  // duplicate names in the proto (they're not considered as 'ids'),
-  // unlike the MPSolver C++ API which crashes if there are duplicate names.
-  // Passing empty names makes the MPSolver generate unique names.
-  //
-  // TODO(user): This limits the number of variables and constraints to 10^9:
-  // we should fix that.
   MPObjective* const objective = MutableObjective();
+  // Passing empty names makes the MPSolver generate unique names.
+  const std::string empty;
   for (int i = 0; i < input_model.variable_size(); ++i) {
     const MPVariableProto& var_proto = input_model.variable(i);
-    MPVariable* variable = MakeNumVar(var_proto.lower_bound(),
-                                      var_proto.upper_bound(), /*name=*/"");
+    MPVariable* variable =
+        MakeNumVar(var_proto.lower_bound(), var_proto.upper_bound(),
+                   clear_names ? empty : var_proto.name());
     variable->SetInteger(var_proto.is_integer());
     objective->SetCoefficient(variable, var_proto.objective_coefficient());
   }
 
   for (int i = 0; i < input_model.constraint_size(); ++i) {
     const MPConstraintProto& ct_proto = input_model.constraint(i);
-    MPConstraint* const ct = MakeRowConstraint(
-        ct_proto.lower_bound(), ct_proto.upper_bound(), /*name=*/"");
+    MPConstraint* const ct =
+        MakeRowConstraint(ct_proto.lower_bound(), ct_proto.upper_bound(),
+                          clear_names ? empty : ct_proto.name());
     ct->set_is_lazy(ct_proto.is_lazy());
     for (int j = 0; j < ct_proto.var_index_size(); ++j) {
       ct->SetCoefficient(variables_[ct_proto.var_index(j)],
@@ -1128,7 +1099,7 @@ bool MPSolver::OutputIsEnabled() const { return !interface_->quiet(); }
 
 void MPSolver::EnableOutput() { interface_->set_quiet(false); }
 
-void MPSolver::SuppressOutput() { interface_->set_quiet(false); }
+void MPSolver::SuppressOutput() { interface_->set_quiet(true); }
 
 int64 MPSolver::iterations() const { return interface_->iterations(); }
 
@@ -1330,6 +1301,59 @@ void MPSolverInterface::SetIntegerParamToUnsupportedValue(
     MPSolverParameters::IntegerParam param, int value) const {
   LOG(WARNING) << "Trying to set a supported parameter: " << param
                << " to an unsupported value: " << value;
+}
+
+bool MPSolverInterface::SetSolverSpecificParametersAsString(
+    const std::string& parameters) {
+#ifdef ANDROID_JNI
+  // This is not implemented on Android because there is no default /tmp and a
+  // pointer to the Java environment is require to query for the application
+  // folder or the location of external storage (if any).
+  return false;
+#else
+  if (parameters.empty()) return true;
+
+  // Note(user): this method needs to return a success/failure boolean
+  // immediately, so we also perform the actual parameter parsing right away.
+  // Some implementations will keep them forever and won't need to re-parse
+  // them; some (eg. SCIP, Gurobi) need to re-parse the parameters every time
+  // they do Solve(). We just store the parameters std::string anyway.
+  std::string extension = ValidFileExtensionForParameterFile();
+  #if defined(__linux)
+    int32 tid = static_cast<int32>(pthread_self());
+  #else  // defined(__linux__)
+    int32 tid = 123;
+  #endif  // defined(__linux__)
+  #if !defined(_MSC_VER)
+    int32 pid = static_cast<int32>(getpid());
+  #else  // _MSC_VER
+    int32 pid = 456;
+  #endif  // _MSC_VER
+    int64 now = base::GetCurrentTimeNanos();
+    std::string filename = StringPrintf("/tmp/parameters-tempfile-%x-%d-%llx%s",
+        tid, pid, now, extension.c_str());
+    bool no_error_so_far = true;
+  if (no_error_so_far) {
+    no_error_so_far =
+        file::SetContents(filename, parameters, file::Defaults()).ok();
+  }
+  if (no_error_so_far) {
+    no_error_so_far = ReadParameterFile(filename);
+    // We need to clean up the file even if ReadParameterFile() returned
+    // false. In production we can continue even if the deletion failed.
+    if (!file::Delete(filename, file::Defaults()).ok()) {
+      LOG(DFATAL) << "Couldn't delete temporary parameters file: " << filename;
+    }
+  }
+  if (!no_error_so_far) {
+    LOG(WARNING) << "Error in SetSolverSpecificParametersAsString() "
+                 << "for solver type: "
+                 << MPModelRequest::SolverType_Name(
+                        static_cast<MPModelRequest::SolverType>(
+                            solver_->ProblemType()));
+  }
+  return no_error_so_far;
+#endif
 }
 
 bool MPSolverInterface::ReadParameterFile(const std::string& filename) {

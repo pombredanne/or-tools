@@ -32,12 +32,17 @@
 
 %include "base/base.swig"
 
-%import "util/python/data.swig"
-%include "util/python/functions.swig"
+// PY_CONVERT_HELPER_* macros.
+%include "constraint_solver/python/constraint_solver_helpers.swig"
 
 // Callback wrapping. See base/python/callbacks.swig.
 #define FATAL_CALLBACK_EXCEPTION
 %include "base/python/callbacks.swig"
+
+// std::function utilities.
+%include "util/python/functions.swig"
+
+%import "util/python/data.swig"
 
 // We *do* need to use SWIGTYPE_... type names directly, because the
 // (recommended replacement) $descriptor macro fails, as of 2014-06, with
@@ -46,6 +51,14 @@
 //swiglint: disable swigtype-name
 
 %{
+#include <setjmp.h>  // For FailureProtect. See below.
+
+// Used in the PROTECT_FROM_FAILURE macro. See below.
+struct FailureProtect {
+  jmp_buf exception_buffer;
+  void JumpBack() { longjmp(exception_buffer, 1); }
+};
+
 // This #includes constraint_solver.h, and inlines some C++ helpers.
 #include "constraint_solver/python/pywrapcp_util.h"
 %}
@@ -83,87 +96,17 @@
 
 // ============= Type conversions ==============
 
-// Conversion utilities, to be able to expose APIs that return a C++ object
-// pointer. The PyObjAs template must be able to deal with all such types.
-%define PY_CONVERT_HELPER_PTR(CType)
-%{
-template<>
-bool PyObjAs(PyObject *py_obj, operations_research::CType** b) {
-  return SWIG_ConvertPtr(py_obj, reinterpret_cast<void**>(b),
-                         SWIGTYPE_p_operations_research__ ## CType,
-                         SWIG_POINTER_EXCEPTION) >= 0;
-}
-%}
-%enddef
+// See ./constraint_solver_helpers.swig
+PY_CONVERT_HELPER_PTR(Decision);
+PY_CONVERT_HELPER_PTR(DecisionBuilder);
 PY_CONVERT_HELPER_PTR(SearchMonitor);
 PY_CONVERT_HELPER_PTR(IntervalVar);
 PY_CONVERT_HELPER_PTR(SequenceVar);
 PY_CONVERT_HELPER_PTR(LocalSearchOperator);
 PY_CONVERT_HELPER_PTR(LocalSearchFilter);
-#undef PY_CONVERT_HELPER_PTR
-
-// Conversion of IntExpr* and IntVar* are a bit special because of the two
-// possible casts from IntExpr and Constraint.
-%define PY_CONVERT_HELPER_INTEXPR_OR_INTVAR(Class)
-%{
-template<>
-bool PyObjAs(PyObject *py_obj, operations_research::Class** var) {
-  // First, try to interpret the python object as an IntExpr.
-  operations_research::IntExpr* t;
-  if (SWIG_ConvertPtr(py_obj, reinterpret_cast<void**>(&t),
-                      SWIGTYPE_p_operations_research__IntExpr,
-                      SWIG_POINTER_EXCEPTION) >= 0) {
-    if (t == nullptr) return false;
-    *var = t->Var();
-    return true;
-  }
-  // Then, try to interpret it as a Constraint.
-  operations_research::Constraint* c;
-  if (SWIG_ConvertPtr(py_obj, reinterpret_cast<void**>(&c),
-                      SWIGTYPE_p_operations_research__Constraint,
-                      SWIG_POINTER_EXCEPTION) >= 0) {
-    if (c == nullptr || c->Var() == nullptr) return false;
-    *var = c->Var();
-    return true;
-  }
-  // Give up.
-  return false;
-}
-%}
-%enddef
 PY_CONVERT_HELPER_INTEXPR_OR_INTVAR(IntVar);
 PY_CONVERT_HELPER_INTEXPR_OR_INTVAR(IntExpr);
-#undef PY_CONVERT_HELPER_INTEXPR_OR_INTVAR
 
-// Conversions of DecisionBuilder* are also special because we redefine
-// our own python PyDecisionBuilder object.
-// TODO(user): for or-tools, remove this code and use directors instead.
-%pythoncode {
-class PyDecisionBuilder(object):
-  def NextWrapper(self, solver):
-    try:
-      return self.Next(solver)
-    except Exception:
-      return solver.FailDecision()
-
-  def DebugString(self):
-    return "PyDecisionBuilder"
-}  // %pythoncode
-%{
-template<>
-bool PyObjAs(PyObject *py_obj, operations_research::DecisionBuilder** b) {
-  if (SWIG_ConvertPtr(py_obj, reinterpret_cast<void**>(b),
-                      SWIGTYPE_p_operations_research__DecisionBuilder,
-                      SWIG_POINTER_EXCEPTION) == -1) {
-    // If the conversion failed, we try to create our own decision builder
-    // if it looks like we're given one.
-    PyErr_Clear();
-    if (PyObject_GetAttrString(py_obj, "Next") == nullptr) return false;
-    *b = new CallPyDecisionBuilder(py_obj);
-  }
-  return true;
-}
-%}
 
 // Actual conversions. This also includes the conversion to std::vector<Class>.
 %define PY_CONVERT(Class)
@@ -185,6 +128,7 @@ PY_LIST_OUTPUT_TYPEMAP(operations_research::Class*, CanConvertTo ## Class,
 %enddef
 PY_CONVERT(IntVar);
 PY_CONVERT(IntExpr);
+PY_CONVERT(Decision);
 PY_CONVERT(DecisionBuilder);
 PY_CONVERT(SearchMonitor);
 PY_CONVERT(IntervalVar);
@@ -193,15 +137,39 @@ PY_CONVERT(LocalSearchOperator);
 PY_CONVERT(LocalSearchFilter);
 #undef PY_CONVERT
 
+// Support passing std::function<void(Solver*)> as argument.
+
+%{
+static void PyFunctionSolverToVoid(PyObject* pyfunc,
+                                   operations_research::Solver* s) {
+  // () needed to force creation of one-element tuple
+  PyObject* const pysolver =
+      SWIG_NewPointerObj(s, SWIGTYPE_p_operations_research__Solver,
+                         SWIG_POINTER_EXCEPTION);
+  PyObject* const pyresult = PyEval_CallFunction(pyfunc, "(O)", pysolver);
+  if (!pyresult) {
+    PyErr_SetString(PyExc_RuntimeError,
+                    "std::function<void(Solver*)> invocation failed.");
+  } else {
+    Py_DECREF(pyresult);
+  }
+}
+%}
+
+%typecheck(SWIG_TYPECHECK_POINTER) std::function<void(
+    operations_research::Solver*)> {
+  $1 = PyCallable_Check($input);
+}
+
+%typemap(in) std::function<void(operations_research::Solver*)> {
+  $1 = [$input](operations_research::Solver* s) {
+    return PyFunctionSolverToVoid($input, s);
+  };
+}
 
 // ============= Extensions ==============
 
 // Add display methods on BaseObject and Solver.
-%extend operations_research::BaseObject {
-  std::string __str__() {
-    return $self->DebugString();
-  }
-}
 %extend operations_research::Solver {
   std::string __str__() {
     return $self->DebugString();
@@ -256,6 +224,10 @@ Constraint* PythonMethodName(int64 date) {
   std::string __repr__() {
     return $self->DebugString();
   }
+
+  std::string __str__() {
+    return $self->DebugString();
+  }
 }
 %enddef
 PY_STRINGIFY_DEBUGSTRING(BaseObject);
@@ -285,16 +257,6 @@ PY_STRINGIFY_DEBUGSTRING(Decision);
   IntExpr* ElementFunction(std::function<int64(int64)> values,
                            IntVar* const index) {
     return $self->MakeElement(values, index);
-  }
-
-  LocalSearchOperator* LNSOperator(const std::vector<IntVar*>& vars,
-                                   PyObject* lns) {
-    return $self->RevAlloc(new PyLNS(vars, lns));
-  }
-
-  LocalSearchOperator* LNSNoValuesOperator(const std::vector<IntVar*>& vars,
-                                           PyObject* lns) {
-    return $self->RevAlloc(new PyLNSNoValues(vars, lns));
   }
 
   DecisionBuilder* VarEvalValStrPhase(
@@ -623,8 +585,8 @@ PY_STRINGIFY_DEBUGSTRING(Decision);
   }
 }
 
-// Add easy variable getters to BaseLNS ([i] gets the value of variable #i).
-%extend operations_research::BaseLNS {
+// Add easy variable getters to BaseLns ([i] gets the value of variable #i).
+%extend operations_research::BaseLns {
   int64 __getitem__(int index) {
     return $self->Value(index);
   }
@@ -642,6 +604,14 @@ PY_STRINGIFY_DEBUGSTRING(Decision);
     return self
 
   def next(self):
+    if self.Ok():
+      result = self.Value()
+      self.Next()
+      return result
+    else:
+      raise StopIteration()
+
+  def __next__(self):
     if self.Ok():
       result = self.Value()
       self.Next()
@@ -726,75 +696,6 @@ PROTECT_FROM_FAILURE(Solver::Fail(), arg1);
 
 // ############ END DUPLICATED CODE BLOCK ############
 
-// ============= Handling C++ flags ==============
-
-// We "convert" the C++ flags to python gflags. We also need to actually
-// pass the value from the python flags to the C++ ones, upon the Solver
-// construction.
-// Phase 1: declare the C++ flags.
-%import "base/commandlineflags.h"
-%{
-DECLARE_bool(cp_trace_propagation);
-DECLARE_bool(cp_trace_search);
-DECLARE_bool(cp_print_model);
-DECLARE_bool(cp_model_stats);
-DECLARE_string(cp_export_file);
-DECLARE_bool(cp_no_solve);
-DECLARE_string(cp_profile_file);
-%}
-// Phase 2: define the python flags.
-%pythoncode {
-import gflags as flags
-FLAGS = flags.FLAGS
-flags.DEFINE_boolean('cp_trace_propagation', False,
-                      'trace all propagation events.')
-flags.DEFINE_boolean('cp_trace_search', False,
-                      'trace all search events.')
-flags.DEFINE_boolean('cp_print_model', False,
-                      'prints the model before solving it.')
-flags.DEFINE_boolean('cp_model_stats', False,
-                      'displays model statistics before solving it.')
-flags.DEFINE_string('cp_export_file', '',
-                     'exports model to file using CPModelProto.')
-flags.DEFINE_boolean('cp_no_solve', False,
-                      'force failures at the beginning of a search.')
-flags.DEFINE_string('cp_profile_file', '',
-                     'exports profiling overview to file.')
-}  // %pythoncode
-// Phase 3: extend the Solver C++ object with a SetFlags() method that sets
-// all the important flags from its input parameters.
-%extend operations_research::Solver {
-  static void SetFlags(bool trace_propagation,
-                       bool trace_search,
-                       bool print_model,
-                       bool model_stats,
-                       const std::string& export_file,
-                       bool no_solve,
-                       const std::string& profile_file) {
-    FLAGS_cp_trace_propagation = trace_propagation;
-    FLAGS_cp_trace_search = trace_search;
-    FLAGS_cp_print_model = print_model;
-    FLAGS_cp_model_stats = model_stats;
-    FLAGS_cp_export_file = export_file;
-    FLAGS_cp_no_solve = no_solve;
-    FLAGS_cp_profile_file = profile_file;
-  }
-}
-// Phase 4: at the beginning of the Solver's constructor code (in python), call
-// SetFlags() with the python flags as parameters.
-// Note: Indentation is critical here as the code is copied verbatim in the
-// python code.
-%feature("pythonprepend") operations_research::Solver::Solver %{
-        Solver.SetFlags(FLAGS.cp_trace_propagation,
-                        FLAGS.cp_trace_search,
-                        FLAGS.cp_print_model,
-                        FLAGS.cp_model_stats,
-                        FLAGS.cp_export_file,
-                        FLAGS.cp_no_solve,
-                        FLAGS.cp_profile_file)
-%}
-
-
 // ============= Exposed C++ API : Solver class ==============
 
 %ignoreall
@@ -819,6 +720,7 @@ namespace operations_research {
 %unignore Solver::SolveAndCommit;
 %unignore Solver::FinishCurrentSearch;
 %unignore Solver::RestartCurrentSearch;
+%unignore Solver::AddBacktrackAction;
 
 // Solver: Debug and performance counters.
 %rename (WallTime) Solver::wall_time;
@@ -880,10 +782,15 @@ namespace operations_research {
 
 // Solver: Constraints about interval variables.
 %rename (FixedDurationIntervalVar) Solver::MakeFixedDurationIntervalVar;
+%rename (IntervalVar) Solver::MakeIntervalVar;
 %rename (FixedInterval) Solver::MakeFixedInterval;
 %rename (MirrorInterval) Solver::MakeMirrorInterval;
 %rename (FixedDurationStartSyncedOnStartIntervalVar)
     Solver::MakeFixedDurationStartSyncedOnStartIntervalVar;
+%rename (FixedDurationStartSyncedOnEndIntervalVar)
+    Solver::MakeFixedDurationStartSyncedOnEndIntervalVar;
+%rename (FixedDurationEndSyncedOnStartIntervalVar)
+    Solver::MakeFixedDurationEndSyncedOnStartIntervalVar;
 %rename (FixedDurationEndSyncedOnEndIntervalVar)
     Solver::MakeFixedDurationEndSyncedOnEndIntervalVar;
 %rename (IntervalRelaxedMin) Solver::MakeIntervalRelaxedMin;
@@ -953,7 +860,8 @@ namespace operations_research {
     Solver::MakeConstraintInitialPropagateCallback;
 %rename (DelayedConstraintInitialPropagateCallback)
     Solver::MakeDelayedConstraintInitialPropagateCallback;
-
+%rename (ActionDemon) Solver::MakeActionDemon;
+%rename (ClosureDemon) Solver::MakeClosureDemon;
 
 // Solver: Solution Collectors
 %rename (BestValueSolutionCollector) Solver::MakeBestValueSolutionCollector;
@@ -1002,6 +910,7 @@ namespace operations_research {
 %rename (AssignVariableValueOrFail) Solver::MakeAssignVariableValueOrFail;
 %rename (AssignVariablesValues) Solver::MakeAssignVariablesValues;
 %rename (FailDecision) Solver::MakeFailDecision;
+%rename (Decision) Solver::MakeDecision;
 
 // Solver: Decision builders. Many versions of MakePhase() are not exposed
 // directly; instead there are python-specific shortcuts provided above.
@@ -1031,7 +940,7 @@ namespace operations_research {
 
 // Solver: Local search operators.
 %rename (Operator) Solver::MakeOperator;
-%rename (RandomLNSOperator) Solver::MakeRandomLNSOperator;
+%rename (RandomLnsOperator) Solver::MakeRandomLnsOperator;
 %unignore Solver::ConcatenateOperators;
 %unignore Solver::RandomConcatenateOperators;
 %rename (LocalSearchPhaseParameters) Solver::MakeLocalSearchPhaseParameters;
@@ -1133,9 +1042,6 @@ namespace operations_research {
 // - LoadModel()
 // - UpgradeModel()
 //
-// TODO(user): implement backtrack actions with std::function and experiment
-// swig with that.
-// - AddBacktrackAction()
 //
 // - DebugString()
 // - VirtualMemorySize()
@@ -1183,7 +1089,6 @@ namespace operations_research {
 // - SaveAndSetValue()
 // - SaveAndAdd()
 //
-// - AddFailHook()
 // - ExportProfilingOverview()
 // - CurrentlyInSolve()
 // - balancing_decision()
@@ -1229,7 +1134,6 @@ namespace operations_research {
 // - Zero()
 // - BaseObject
 // - DecisionVisitor
-// - Action
 // - ModelVisitor
 // - CastConstraint
 // - NumericalRev<>
@@ -1337,27 +1241,27 @@ namespace operations_research {
 // Ignored:
 // - DebugString()
 // - Accept()
+%feature ("director") Decision;
 %unignore Decision;
 %unignore Decision::Decision;
 %unignore Decision::~Decision;
-%unignore Decision::Apply;
-%unignore Decision::Refute;
-
+%rename (ApplyWrapper) Decision::Apply;
+%rename (RefuteWrapper) Decision::Refute;
+%feature("nodirector") Decision::Accept;
 
 // DecisionBuilder
-// Ignored:
-// - DebugString()
+%feature("director") DecisionBuilder;
 %unignore DecisionBuilder;
 %unignore DecisionBuilder::DecisionBuilder;
 %unignore DecisionBuilder::~DecisionBuilder;
-%unignore DecisionBuilder::Next;
+%rename (NextWrapper) DecisionBuilder::Next;
+%unignore DecisionBuilder::DebugString;
+%feature("nodirector") DecisionBuilder::Accept;
+%feature("nodirector") DecisionBuilder::AppendMonitors;
 
 
 // Constraint
 // Ignored:
-// - Post()
-// - DebugString()
-// - PostAndPropagate()
 // - Accept()
 // - IsCastConstraint()
 %unignore Constraint;
@@ -1374,6 +1278,7 @@ namespace operations_research {
 %unignore Constraint::Post;
 %unignore Constraint::InitialPropagate;
 %rename (InitialPropagateWrapper) Constraint::InitialPropagate;
+%unignore Constraint::DebugString;
 
 
 // SearchMonitor.
@@ -2003,6 +1908,7 @@ namespace operations_research {
 // Ignored:
 // - LocalSearchOperator()
 // - ~LocalSearchOperator()
+%feature("director") LocalSearchOperator;
 %unignore LocalSearchOperator;
 %rename (NextNeighbor) LocalSearchOperator::MakeNextNeighbor;
 %unignore LocalSearchOperator::Start;
@@ -2048,16 +1954,23 @@ namespace operations_research {
 %rename (OneNeighbor) IntVarLocalSearchOperator::MakeOneNeighbor;
 
 
-// BaseLNS.
-%unignore BaseLNS;
-%feature("director") BaseLNS;
-%unignore BaseLNS::BaseLNS;
-%unignore BaseLNS::~BaseLNS;
-%unignore BaseLNS::InitFragments;
-%rename (NextFragmentWrapper) BaseLNS::NextFragment;
+// BaseLns.
+%feature("director") BaseLns;
+%unignore BaseLns::BaseLns;
+%unignore BaseLns;
+%unignore BaseLns::~BaseLns;
+%unignore BaseLns::InitFragments;
+%unignore BaseLns::NextFragment;
+%feature ("nodirector") BaseLns::OnStart;
+%feature ("nodirector") BaseLns::SkipUnchanged;
+%feature ("nodirector") BaseLns::MakeOneNeighbor;
+%unignore BaseLns::IsIncremental;
+%unignore BaseLns::AppendToFragment;
+%unignore BaseLns::FragmentSize;
 
 // ChangeValue
 %unignore ChangeValue;
+%feature ("director") ChangeValue;
 %unignore ChangeValue::ChangeValue;
 %unignore ChangeValue::~ChangeValue;
 %unignore ChangeValue::ModifyValue;
@@ -2150,15 +2063,38 @@ namespace operations_research {
 // ============= Custom python wrappers around C++ objects ==============
 // (this section must be after the constraint_solver*.h %includes)
 
-// Helpers to manipulate a wrapped C++ std::vector<int>*. Their wrapped versions
-// are used in the python PyLNS.NextFragmentWrapper() method below.
-// Note(user): We attempted to use %typemaps instead, but didn't make it work.
-%inline %{
-inline void ClearIntVector(std::vector<int>* v) { v->clear(); }
-inline void PushBackIntVector(int x, std::vector<int>* v) { v->push_back(x); }
-%}
 %pythoncode {
-class PyDecisionBuilder(object):
+class PyDecision(Decision):
+
+  def __init__(self):
+    Decision.__init__(self)
+
+  def ApplyWrapper(self, solver):
+    try:
+       self.Apply(solver)
+    except Exception as e:
+      if 'CP Solver fail' in str(e):
+        solver.ShouldFail()
+      else:
+        raise
+
+  def RefuteWrapper(self, solver):
+    try:
+       self.Refute(solver)
+    except Exception as e:
+      if 'CP Solver fail' in str(e):
+        solver.ShouldFail()
+      else:
+        raise
+
+  def DebugString(self):
+    return "PyDecision"
+
+
+class PyDecisionBuilder(DecisionBuilder):
+
+  def __init__(self):
+    DecisionBuilder.__init__(self)
 
   def NextWrapper(self, solver):
     try:
@@ -2174,6 +2110,9 @@ class PyDecisionBuilder(object):
 
 
 class PyConstraint(Constraint):
+
+  def __init__(self):
+    Constraint.__init__(self)
 
   def InitialPropagateWrapper(self):
     try:
@@ -2201,23 +2140,4 @@ class PyDemon(Demon):
 
   def DebugString(self):
     return "PyDemon"
-
-
-class PyLns(BaseLNS):
-
-  def NextFragment(self):
-    return []
-
-  def InitFragments(self):
-    pass
-
-  def NextFragmentWrapper(self, output_cpp_vector_fragments):
-    ClearIntVector(output_cpp_vector_fragments);
-    f = self.NextFragment()
-    if not f:
-      return False
-    for x in f:
-      PushBackIntVector(x, output_cpp_vector_fragments);
-    return True
 }  // %pythoncode
-

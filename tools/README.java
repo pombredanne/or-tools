@@ -1,6 +1,6 @@
 This file describes how to use the or-tools java binary archive.
 
-OR-Tools is located at http://code.google.com/p/or-tools
+OR-Tools is located at https://developers.google.com/optimization
 
 This module has been tested under:
   - ubuntu 10.04 and up (32 and 64 bit).
@@ -20,7 +20,7 @@ or-tools/
 Running the examples will involve compiling them, then running them.
 
 Let's compile and run
-examples/com/google/ortools/constraintsolver/samples/RabbitsPheasants.java
+examples/com/google/ortools/samples/RabbitsPheasants.java
 
-javac -d objs -cp lib/com.google.ortools.jar examples/com/google/ortools/constraintsolver/samples/RabbitsPheasants.java
-java -Djava.library.path=lib -cp objs:lib/com.google.ortools.jar com.google.ortools.constraintsolver.samples.RabbitsPheasants
+javac -d objs -cp lib/com.google.ortools.jar examples/com/google/ortools/samples/RabbitsPheasants.java
+java -Djava.library.path=lib -cp objs:lib/com.google.ortools.jar com.google.ortools.samples.RabbitsPheasants
